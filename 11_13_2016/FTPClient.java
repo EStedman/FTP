@@ -4,130 +4,254 @@ import java.util.*;
 
 import java.lang.*;
 
+/**
+ * 
+ * @author zomerlej FTPClient is the client side of the p2p network. Everybody
+ *         connected to the CentralServer is a peer to each other.
+ */
+@SuppressWarnings("deprecation")
 public class FTPClient {
 	Socket socket = null;
 	Socket dataSocket = null;
 	Socket mySocket = null;
-	DataInputStream dataIn, peerDataIn;
-	DataOutputStream dataOut, peerDataOut;
+	DataInputStream dataIn;
+	DataOutputStream dataOut;
+	DataOutputStream peerDataOut = null;
+	DataInputStream peerDataIn = null;
 	String myHost;
 	String[] result = { "", "", "", "", "", "", "" };
-	int portNumber;
-	// FTPServer server;
+	int GportNumber;
+	ArrayList<userInformation> found;
 
+	// FTPServer server;
+	/**
+	 * The GUI creates this object. The portNum is the port that is particular
+	 * client is listening on.
+	 * 
+	 * @param portNum
+	 * @throws IOException
+	 */
 	public FTPClient(int portNum) throws IOException {
-		portNumber = portNum;
-		System.out.println("" + portNumber);
+		GportNumber = portNum;
 
 	}
 
+	/**
+	 * otherClientConnections handles the incoming connection from other clients
+	 * 
+	 * @throws IOException
+	 */
+
+	@SuppressWarnings("resource")
 	private void otherClientsConnections() throws IOException {
-		ServerSocket serverListenSocket = new ServerSocket(portNumber);
-		ServerSocket dataListenSocket = new ServerSocket();
+		// set up sockets and streams to use
+		ServerSocket serverListenSocket = new ServerSocket(GportNumber);
 
+		// ServerSocket dataListenSocket = new ServerSocket();
+		Socket clientDataSocket = null;
+		DataInputStream in = null;
+		DataOutputStream out = null;
+		// While connected to main server....
 		while (!socket.isClosed()) {
-			Socket clientDataSocket = serverListenSocket.accept();
-			System.out.println("Connection recieved");
-			DataInputStream in = new DataInputStream(clientDataSocket.getInputStream());
-			DataOutputStream out = new DataOutputStream(clientDataSocket.getOutputStream());
+			if (clientDataSocket != null) {
+				// If we are connected, do nothing because we're still
+				// retrieving files from this person
+			} else {
+				// If we aren't connected, let's wait until some one attempts to
+				// connect to us.
+				clientDataSocket = serverListenSocket.accept();
+				System.out.println("Connection recieved");
+				in = new DataInputStream(clientDataSocket.getInputStream());
+				out = new DataOutputStream(clientDataSocket.getOutputStream());
+			}
+			// The next line is USUALLY the file name but sometimes the user
+			// might be disconnecting from the peer
 			String file = in.readLine();
-			System.out.println(file);
-			File f = new File(System.getProperty("user.dir") + file);
 
-			if (f.exists() && !f.isDirectory()) {
-				FileInputStream fis = null;
-				fis = new FileInputStream(f);
-				try {
-					System.out.println("Sending File...");
-					byte[] buffer = new byte[1024];
-					int bytes = 0;
-					while ((bytes = fis.read(buffer)) != -1) {
-						System.out.println("Writing File...");
-						out.write(buffer, 0, bytes);
+			// If the user is immediately disconnecting, let's catch this so we
+			// don't try to talk with a socket that is closed
+			if (("Disconnecting".equals(file))) {
+				clientDataSocket = null;
+				// socket.close();
+			} else {
+				// Since the user didn't disconnect, it must be a file being
+				// sent.
+				File f = new File(System.getProperty("user.dir") + "//" + file);
+				if (f.exists() && !f.isDirectory()) {
+					// System.out.println("Sending file:" + f);
+					// System.out.println("This file is being sent to the user
+					// on: " + clientDataSocket.getInetAddress());
+					try {
+						// declare variables for converting file to byte[]
+						FileInputStream fileInputStream = new FileInputStream(f);
+						byte[] fileByteArray = new byte[(int) f.length()];
+
+						// convert file
+						fileInputStream.read(fileByteArray);
+						fileInputStream.close();
+
+						// write to client over DATA line
+						out.write(fileByteArray);
+						// System.out.println("File finished being sent to the
+						// user on: " + clientDataSocket.getInetAddress());
+
+					} catch (Exception e) {
+						e.printStackTrace();
 					}
-					fis.close();
-					System.out.println("Sent File: " + f);
-				} catch (Exception e) {
-					System.out.println("ERROR in FILE TRANSFER.");
+				}
+				// If the file doesn't let the user who is connected to the peer
+				// know
+				if (!f.exists()) {
+					out.writeBytes("Nope.avi");
+					System.out.println("Doesn't exist!");
 				}
 			}
-			if (!f.exists()) {
-				System.out.println("Doesn't exist!");
-			}
-
-			ClientCommands("disconnect");
 		}
 		if (mySocket.isClosed()) {
 			System.out.println("Ready to connect to a peer");
 		}
 	}
 
-	public void ClientCommands(String command) throws IOException {
+	@SuppressWarnings("null")
+	public String ClientCommands(String command) throws IOException {
+		String returnString = command;
 		if (command.length() != 0) {
+			returnString = ">>" + command + "\n";
 			StringTokenizer cmdStatement = new StringTokenizer(command);
 			String currentCMD = cmdStatement.nextToken();
+
 			String peerIP;
 			int peerPort;
 
 			if (currentCMD.toLowerCase().equals("connect")) {
+				// If command is connect lets try to connect to the peer that
+				// we've selected
 				try {
-					peerIP = cmdStatement.nextToken();
-					peerPort = Integer.parseInt(cmdStatement.nextToken());
-					mySocket = new Socket(peerIP, peerPort);
+					// If the user is already connected but uses the connect
+					// command again let the user know they're already connected
+					// to a peer and should disconnect first
+					if (mySocket == null) {
+						returnString += "Connected to peer";
+						peerIP = cmdStatement.nextToken();
+						peerPort = Integer.parseInt(cmdStatement.nextToken());
+						mySocket = new Socket(peerIP, peerPort);
+						peerDataOut = new DataOutputStream(mySocket.getOutputStream());
+						peerDataIn = new DataInputStream(mySocket.getInputStream());
+					} else {
+						if (mySocket.isClosed() == false) {
+							returnString += ("Disconnect before connecting to a new client.");
+						} else {
+							peerIP = cmdStatement.nextToken();
+							peerPort = Integer.parseInt(cmdStatement.nextToken());
+							mySocket = new Socket(peerIP, peerPort);
+							peerDataOut = new DataOutputStream(mySocket.getOutputStream());
+							peerDataIn = new DataInputStream(mySocket.getInputStream());
+							returnString += "Connected to peer";
+						}
+					}
 				} catch (Exception e) {
-					e.printStackTrace();
+					returnString += ("Failed to connect to peer, ensure they exist.");
 				}
-			}
-			if (currentCMD.toLowerCase().equals("retr")) {
+			} else if (currentCMD.toLowerCase().equals("retr")) {
+				// If the command is retr let's try to retrieve the file listed
+				// If the file doesn't exist, it will let the user know, if it
+				// does exist it will place the file within a new directory.
 				if (mySocket.isConnected()) {
-
-					peerDataOut = new DataOutputStream(mySocket.getOutputStream());
-					peerDataIn = new DataInputStream(mySocket.getInputStream());
-					currentCMD = cmdStatement.nextToken();
-					FileOutputStream fos = null;
-					File file = new File(currentCMD);
-					fos = new FileOutputStream(file);
-					System.out.println("Receiving File...");
+					int recvMsgSize;
 					byte[] b = new byte[8096];
+					currentCMD = cmdStatement.nextToken();
+					// Make a directory for the downloaded files(Always runs,
+					// (safe))
+					new File(System.getProperty("user.dir") + "//DownloadedFiles//").mkdir();
+					String fileRequestedString = new String(
+							(System.getProperty("user.dir") + "//DownloadedFiles//" + currentCMD).getBytes());
 					peerDataOut.writeBytes(currentCMD + "\n");
-					int amount_read = dataIn.read(b);
+					recvMsgSize = peerDataIn.read(b);
+					String FileMessage = new String(b, 0, recvMsgSize);
+					// If the file doesn't exist on the peer, let the user know
+					// that it does't exist.
+					if (("Nope.avi".equals(FileMessage))) {
+						returnString += ("File doesn't exist on this peer.\n");
+					} else {
+						// If the file DOES exist, receive and write the bytes
+						// to a file.t
+						try {
 
-					System.out.println("Copying File...");
-
-					fos.write(b, 0, amount_read);
+							File fileRequested = new File(fileRequestedString);
+							FileOutputStream fileOutputStream = new FileOutputStream(fileRequested);
+							fileOutputStream.write(b, 0, recvMsgSize);
+							fileOutputStream.close();
+							returnString += ("Wrote the file: " + fileRequestedString);
+						} catch (Exception e) {
+							returnString += ("Error trying to write file.");
+						}
+					}
+				} else {
+					// Not connected? Probably ought to connect kiddo
+					returnString += ("You have to connect to some one before you can retrieve a file.");
 				}
 			}
-			if (currentCMD.toLowerCase().equals(("dc")) || currentCMD.toLowerCase().equals("disconnect")) {
-				mySocket.close();
-				peerDataOut.close();
-				peerDataIn.close();
-				System.out.println("Connection closed");
+			// The command is dc or disconnect so please remove my files from
+			// the centralserver's information so I don't exist
+			else if (currentCMD.toLowerCase().equals(("dc")) || currentCMD.toLowerCase().equals("disconnect")) {
+				if (mySocket.isClosed()) {
+
+				} else {
+					returnString += ("Connection closed");
+					peerDataOut.writeBytes("Disconnecting\n");
+
+					mySocket.close();
+				}
+			} else {
+				// Everything else isn't a command.
+				returnString += ("Not a valid command");
 			}
 		}
+		return returnString;
 	}
 
-	public void connect(String hostName, int portNumber, String userName, String myIP, String speed) throws Exception {
+	/**
+	 * From the GUI, get the necessary information to run this function.
+	 * 
+	 * @param hostName
+	 *            = Server's IP
+	 * @param portNumber
+	 *            = Server's Port Number that it is listening on
+	 * @param userName
+	 * @param myIP
+	 * @param speed
+	 *            = speed of connection(filler)
+	 * @throws Exception
+	 */
+	public String connect(String hostName, int portNumber, String userName, String myIP, String speed)
+			throws Exception {
 		myHost = hostName;
+		String returnMessage;
 		// Create socket that is connected to server on specified port
 		socket = new Socket(hostName, portNumber);
 		dataSocket = new Socket(hostName, 1079);
-
 		dataOut = new DataOutputStream(dataSocket.getOutputStream());
 		dataIn = new DataInputStream(dataSocket.getInputStream());
-		System.out.println("Connecting to main server HUB." + "\nServer: " + hostName + "\nPort: " + 1079);
-		System.out.println("The connection information for this machine is: " + socket.getLocalAddress() + "\nPort: "
+
+		returnMessage = ("Connecting to main server HUB." + "\nServer: " + hostName + "\nPort: " + 1079);
+		returnMessage += ("\nThe connection information for this machine is: " + socket.getLocalAddress() + "\nPort: "
 				+ socket.getLocalPort());
 		File f = new File(System.getProperty("user.dir") + "/filelist.xml");
 
+		// Let's start sending filelist.xml to the Server if it exists in the
+		// directory that fits the line above this one
 		if (f.exists() && !f.isDirectory()) {
 			FileInputStream fis = null;
 			fis = new FileInputStream(f);
 			try {
+				// Send the server the user's information
 				dataOut.writeBytes(userName + "\n");
 				dataOut.writeBytes(myIP + "\n");
-				dataOut.writeBytes(portNumber + "\n");
+				dataOut.writeBytes(GportNumber + "\n");
 				dataOut.writeBytes(speed + "\n");
-				System.out.println("Sending File...");
+
+				// Work on sending file
+				System.out.println("Sending Filelist...");
 				byte[] buffer = new byte[1024];
 				int bytes = 0;
 				while ((bytes = fis.read(buffer)) != -1) {
@@ -136,6 +260,8 @@ public class FTPClient {
 				}
 				fis.close();
 				System.out.println("Sent File: " + f);
+
+				// Start thread for user to listen for peers
 				new Thread() {
 					public void run() {
 						try {
@@ -145,9 +271,12 @@ public class FTPClient {
 						}
 					}
 				}.start();
+				// Start thread for this client to connect to other peers
 				new Thread() {
 					public void run() {
 						try {
+							// Blank string is just to keep it simple for my own
+							// sanity
 							ClientCommands("");
 						} catch (IOException e) {
 							e.printStackTrace();
@@ -159,47 +288,89 @@ public class FTPClient {
 				System.out.println("ERROR in FILE TRANSFER.");
 			}
 		}
+		// If filelist.xml doesn't exist, let the user know
 		if (!f.exists()) {
 			System.out.println("Doesn't exist!");
 		}
+		// close dataSocket
 		dataSocket.close();
+		return returnMessage;
 	}
 
-	public String getHostName() {
-		return socket.getLocalAddress().toString();
-	}
-
+	/**
+	 * Based on the text used, search the CentralSerer for files who's
+	 * description contains the text
+	 * 
+	 * @param text
+	 */
 	public void search(String text) {
-		ArrayList<userInformation> found = new ArrayList<userInformation>();
+		// Holder of people found from the search
+		found = new ArrayList<userInformation>();
+		// Can't search if the socket is closed dummy
 		if (!socket.isClosed()) {
 			try {
-
+				// Socket and Input/Output streams
 				dataSocket = new Socket(myHost, 1079);
-
 				dataOut = new DataOutputStream(dataSocket.getOutputStream());
 				dataIn = new DataInputStream(dataSocket.getInputStream());
-				// dataSocket = new Socket(myHost, 1079);
-				if (text.equals(""))
-					text = " ";
+
+				// Send the keyword
 				dataOut.writeBytes(text + "\n");
-				// dataOut.writeBytes(text+"\n");
+				// Receive how many people I'm going to populate my holder with
 				String size = dataIn.readLine();
-				System.out.println("" + size);
+				// For how big the size is, build the userInformation with that
+				// many spots.
 				for (int i = 0; i < Integer.parseInt(size); i++) {
 					result = dataIn.readLine().split("::");
 					userInformation user = new userInformation(result[0], result[1], result[2], result[3], result[4],
 							result[5]);
-					System.out.println(result[4]);
+					// System.out.println(result[0] + "\t" + result[1] + "\t" +
+					// result[2] + "\t" + result[3] + "\t"
+					// + result[4] + "\t" + result[5]);
 					found.add(user);
 				}
+
+				// Close the socket
 				dataSocket.close();
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				System.out.println("Error");
-				System.out.println(e.getStackTrace());
+
+				System.out.println("Error some how");
 			}
 		}
 
+	}
+
+	/**
+	 * Return the found files back to the GUI :)
+	 * 
+	 * @return
+	 */
+	public ArrayList<userInformation> getFileInfo() {
+		if (found != null)
+			return found;
+		return new ArrayList<userInformation>();
+	}
+
+	/**
+	 * Remove this user's files from the main server's
+	 */
+	public void Disconnect() {
+		if (socket != null) {
+			if (socket.isConnected()) {
+				if (!socket.isClosed()) {
+					try {
+
+						// DC PLEASE
+						dataSocket = new Socket(myHost, 1079);
+
+						dataOut = new DataOutputStream(dataSocket.getOutputStream());
+						dataIn = new DataInputStream(dataSocket.getInputStream());
+						dataOut.writeBytes("DCFROMSERVERPLS\n");
+					} catch (Exception e) {
+					}
+				}
+			}
+		}
 	}
 
 }

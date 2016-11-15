@@ -2,12 +2,22 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 
+/**
+ * 
+ * @author zomerlej Hey this is the CentralServer
+ */
 public class CentralServer {
+	// Global counter, sorta useless
 	int count = 0;
+	// Two user lists, one total list, one the searched one
 	ArrayList<userInformation> users = new ArrayList<userInformation>();
 	ArrayList<userInformation> feed = new ArrayList<userInformation>();
+
+	// Port number to listen on
 	static int portNumb = 2597;
 
+	// Main method, start the centralServerwith either default port or one
+	// within args[]
 	public static void main(String args[]) throws IOException {
 		if (args.length == 0) {
 			new CentralServer(portNumb);
@@ -20,6 +30,13 @@ public class CentralServer {
 
 	}
 
+	/**
+	 * CentralServer receives the port to listen on. Constantly listen for new
+	 * connections, start threads as we get new connections.
+	 * 
+	 * @param listenPort
+	 * @throws IOException
+	 */
 	public CentralServer(int listenPort) throws IOException {
 		// Establish the listen socket.
 		ServerSocket serverListenSocket = new ServerSocket(listenPort);
@@ -33,6 +50,11 @@ public class CentralServer {
 		}
 	}
 
+	/**
+	 * 
+	 * The thread that handles each connection
+	 * 
+	 */
 	class HandlerFTP extends Thread {
 
 		Socket clientSocket;
@@ -43,7 +65,8 @@ public class CentralServer {
 		DataInputStream dataIn;
 		DataOutputStream dataOut;
 
-		// Constructor
+		// Constructor is sorta odd, dataListener isn't needed but lets not
+		// remove it
 		public HandlerFTP(Socket socket, ServerSocket datalistener) throws IOException {
 			this.clientSocket = socket;
 			this.dataSocket = datalistener;
@@ -51,9 +74,11 @@ public class CentralServer {
 			this.out = new DataOutputStream(clientSocket.getOutputStream());
 		}
 
+		// Run the thread!
 		public void run() {
 			try {
-
+				// This thread's user's within the main list of files
+				ArrayList<userInformation> connectionUsers = new ArrayList<userInformation>();
 				System.out.println("Handling Request...\n" + "Client: " + clientSocket.getInetAddress().getHostAddress()
 						+ "\nPort: " + clientSocket.getPort());
 
@@ -67,7 +92,8 @@ public class CentralServer {
 					File file = new File("filelist" + count + ".xml");
 
 					String WholeLine = dataIn.readLine();
-					if (WholeLine.contains("USER")) {
+					// If weren't first connecting, let's figure out who we are
+					if (WholeLine.startsWith("USER")) {
 						try {
 							FileOutputStream fos = null;
 							fos = new FileOutputStream(file);
@@ -78,21 +104,21 @@ public class CentralServer {
 							String hostIP = dataIn.readLine();
 							String portInformation = dataIn.readLine();
 							String speed = dataIn.readLine();
-							// amount_read = dataIn.read(b);
 
 							amount_read = dataIn.read(b);
-
+							// Receive a new filelist.xml
 							System.out.println("Copying File...");
 
 							fos.write(b, 0, amount_read);
 							fos.flush();
 							fos.close();
 							BufferedReader br = new BufferedReader(new FileReader("filelist" + count + ".xml"));
+							// Go through the filelist.xml and build stuff
 							try {
 								String line = br.readLine(); // waste
 								String fileName;
 								String fileDescription;
-								// line = br.readLine(); // actual stuff
+
 								line = br.readLine();
 								if (line.equals("<filelist>")) {
 
@@ -109,52 +135,74 @@ public class CentralServer {
 											userInformation user = new userInformation(name, hostIP, portInformation,
 													speed, fileName, fileDescription);
 											users.add(user);
-
+											connectionUsers.add(user);
 										}
 									}
 
 								}
 							} finally {
-								String line = br.readLine();
+								// close the reader
 								br.close();
 							}
 
 						} catch (Exception e) {
+							// error catch
 							System.out.println(e.getStackTrace().toString());
 						}
+						// Count it up but it actually doesn't matter, the files
+						// are deleted anyways.
 						count++;
 						System.out.println("File " + file + " retrieved.");
+						file.delete();
+					} else if (WholeLine.contains("DCFROMSERVERPLS")) {
+						// Close the socket/disconnect the client from the
+						// server(exit the while loop I'm in)
+
+						clientSocket.close();
 					} else {
-						if (WholeLine.toLowerCase().equals("Q")) {
-							clientDataSocket.close();
-							users.clear();
-						}
+						// If it's any other command received, it has to be the
+						// keyword search
+						if ("".equals(WholeLine)) {
 
-						for (userInformation desc : users) {
-							if (desc.getClientFileDescription().toLowerCase().contains(WholeLine.toLowerCase())) {
-								feed.add(desc);
+						} else {
+							// If the keyword appears within the descriptor of a
+							// particular file on the search, build the feed
+							for (userInformation desc : users) {
+								if (desc.getClientFileDescription().toLowerCase().contains(WholeLine.toLowerCase())) {
+									feed.add(desc);
 
+								}
 							}
+							// Tell the client how many files it is about to
+							// list
+							dataOut.writeBytes(feed.size() + "\n");
+							// Send those files to the client
+							for (userInformation sending : feed) {
+
+								dataOut.writeBytes(sending.getClientName() + "::" + sending.getClientIP() + "::"
+										+ sending.getClientPort() + "::" + sending.getClientSpeed() + "::"
+										+ sending.getClientFiles() + "::" + sending.getClientFileDescription() + "\n");
+							}
+							// Clear the feed
+							feed.clear();
 						}
 
-						dataOut.writeBytes(feed.size() + "\n");
-						System.out.println("First " + feed.size());
-						ArrayList<userInformation> feed2 = feed;
-						for (userInformation sending : feed) {
-
-							dataOut.writeBytes(sending.getClientName() + "::" + sending.getClientIP() + "::"
-									+ sending.getClientPort() + "::" + sending.getClientSpeed() + "::"
-									+ sending.getClientFiles() + "::" + sending.getClientFileDescription() + "\n");
-						}
-						feed.clear();
 					}
-
+					// After every command send, close the dataIn and dataOut
 					dataIn.close();
 					dataOut.close();
 				}
+				// If we leave the while, remove the users that the connection
+				// did add to the overall user list.
+				if (clientSocket.isClosed()) {
+					for (userInformation me : connectionUsers) {
+						if (users.contains(me)) {
+							users.remove(me);
+							System.out.println("Removed user's file listed on server");
+						}
+					}
+				}
 			} catch (IOException e) {
-				System.out.println("Error handling the thread.");
-				System.out.println(e);
 			}
 		}
 

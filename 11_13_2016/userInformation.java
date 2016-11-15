@@ -41,4 +41,9 @@ public class userInformation {
 	public String getClientFileDescription() {
 		return ClientFileDescription;
 	}
+
+	public String toString() {
+		return getClientIP() + ":" + getClientPort() + "\t" + getClientSpeed() + "\t" + getClientFiles() + "\t"
+				+ getClientFileDescription();
+	}
 }
